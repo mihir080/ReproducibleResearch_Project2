@@ -1,0 +1,224 @@
+Impact of Weather Events on Life and Economy 
+===================================================
+
+## Synopsis
+This is the second assignment of the course 'Reproducible Research'. 
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+For the purpose of this assignment we will be analysing the weather data available in the United States and predicting which conditions result in the highest loss of life and economy. 
+The analysis of the data shows that tornadoes, by far, have the greatest health impact as measured by the number of injuries and fatalities The analysis also shows that floods cause the greatest economic impact as measured by property damage and crop damage.
+
+## Data Processing
+### Loading Libraries
+Following libraries were used for the analysis
+```{r}
+library(ggplot2)
+library(plyr)
+library(dplyr)
+```
+
+### Data
+Loading the data 
+```{r}
+if(!exists("storm.data")) {
+      storm.data<- read.csv(bzfile("storm.csv.bz2"), header = TRUE)
+}
+```
+
+Examine the data 
+```{r}
+dim(storm.data)
+```
+Examine the data structure
+```{r}
+str(storm.data)
+```
+
+### Extracting the Required Variables
+
+From a list of variables in storm.data, these are columns of interest:
+
+Health variables:
+
+* FATALITIES: approx. number of deaths
+* INJURIES: approx. number of injuries
+
+Economic variables:
+
+* PROPDMG: approx. property damags
+* PROPDMGEXP: the units for property damage value
+* CROPDMG: approx. crop damages
+* CROPDMGEXP: the units for crop damage value
+
+Events - target variable:
+
+* EVTYPE: weather event (Tornados, Wind, Snow, Flood, etc..)
+
+```{r}
+vars <- c("EVTYPE", "CROPDMG", "CROPDMGEXP", "PROPDMG", "PROPDMGEXP", "FATALITIES", "INJURIES")
+```
+Reorganising Data 
+```{r}
+mydata <- storm.data[, vars]
+```
+Checking Data 
+```{r}
+head(mydata)
+```
+```{r}
+tail(mydata)
+```
+
+### Checking for missing values
+Checking for NA values in the data 
+```{r}
+sum(is.na(mydata$CROPDMG))
+sum(is.na(mydata$CROPDMGEXP))
+sum(is.na(mydata$PROPDMG))
+sum(is.na(mydata$PROPDMGEXP))
+sum(is.na(mydata$FATALITIES))
+sum(is.na(mydata$INJURIES))
+```
+
+### Transforming the Data as per Requirement
+Listing the events
+```{r}
+sort(table(mydata$EVTYPE), decreasing = TRUE)[1:10]
+```
+We will have to group these events on Broad categories like HEAT, FLOOD, etc. We will do this by comparing the key words and in case there is no match we will take it as OTHERS
+```{r}
+##create a new variable to transform events into groups 
+mydata$EVENT <- "OTHER"
+##group by keywords 
+mydata$EVENT[grep("HAIL", mydata$EVTYPE, ignore.case = TRUE)] <- "HAIL"
+mydata$EVENT[grep("HEAT", mydata$EVTYPE, ignore.case = TRUE)] <- "HEAT"
+mydata$EVENT[grep("FLOOD", mydata$EVTYPE, ignore.case = TRUE)] <- "FLOOD"
+mydata$EVENT[grep("WIND", mydata$EVTYPE, ignore.case = TRUE)] <- "WIND"
+mydata$EVENT[grep("TORNADO", mydata$EVTYPE, ignore.case = TRUE)] <- "TORNADO"
+mydata$EVENT[grep("STORM", mydata$EVTYPE, ignore.case = TRUE)] <- "STORM"
+mydata$EVENT[grep("SNOW", mydata$EVTYPE, ignore.case = TRUE)] <- "SNOW"
+mydata$EVENT[grep("RAIN", mydata$EVTYPE, ignore.case = TRUE)] <- "RAIN"
+mydata$EVENT[grep("WINTER", mydata$EVTYPE, ignore.case = TRUE)] <- "WINTER"
+##List the transformed data 
+sort(table(mydata$EVENT), decreasing = TRUE)
+```
+
+Checking the values which represent money (Dollars)
+
+```{r}
+sort(table(mydata$PROPDMGEXP), decreasing = TRUE)[1:10]
+```
+```{r}
+sort(table(mydata$CROPDMGEXP), decreasing = TRUE)[1:10]
+```
+
+There is some mess in units, so we transform those variables in one unit (dollar) variable by the following rule:
+* K or k: thousand dollars (10^3)
+* M or m: million dollars (10^6)
+* B or b: billion dollars (10^9)
+* the rest would be consider as dollars
+
+```{r}
+mydata$PROPDMGEXP <- as.character(mydata$PROPDMGEXP)
+mydata$PROPDMGEXP[is.na(mydata$PROPDMGEXP)] <- 0 ##NA values are dollars 
+mydata$PROPDMGEXP[!grepl("K|M|B", mydata$PROPDMGEXP, ignore.case = TRUE)] <- 0
+mydata$PROPDMGEXP[grep("K", mydata$PROPDMGEXP, ignore.case = TRUE)] <- "3"
+mydata$PROPDMGEXP[grep("M", mydata$PROPDMGEXP, ignore.case = TRUE)] <- "6"
+mydata$PROPDMGEXP[grep("B", mydata$PROPDMGEXP, ignore.case = TRUE)] <- "9"
+mydata$PROPDMGEXP <- as.numeric(as.character(mydata$PROPDMGEXP))
+mydata$property.damage <- mydata$PROPDMG * 10^mydata$PROPDMGEXP
+
+mydata$CROPDMGEXP <- as.character(mydata$CROPDMGEXP)
+mydata$CROPDMGEXP[is.na(mydata$CROPDMGEXP)] <- 0 ##NA values are dollars 
+mydata$CROPDMGEXP[!grepl("K|M|B", mydata$CROPDMGEXP, ignore.case = TRUE)] <- 0
+mydata$CROPDMGEXP[grep("K", mydata$CROPDMGEXP, ignore.case = TRUE)] <- "3"
+mydata$CROPDMGEXP[grep("M", mydata$CROPDMGEXP, ignore.case = TRUE)] <- "6"
+mydata$CROPDMGEXP[grep("B", mydata$CROPDMGEXP, ignore.case = TRUE)] <- "9"
+mydata$CROPDMGEXP <- as.numeric(as.character(mydata$CROPDMGEXP))
+mydata$crop.damage <- mydata$CROPDMG * 10^mydata$CROPDMGEXP
+```
+Print and view top 10 values of damages 
+```{r}
+sort(table(mydata$property.damage), decreasing = TRUE)[1:10]
+```
+```{r}
+sort(table(mydata$crop.damage), decreasing = TRUE)[1:10]
+```
+
+## Data Analysis
+### Aggregating Events for Health
+```{r}
+##aggregate fatalities and injusries by event 
+agg.fatalities.and.injuries<- ddply(mydata, .(EVENT), summarize, Total = sum(FATALITIES + INJURIES, na.rm = TRUE))
+agg.fatalities.and.injuries$type <- "fatalities and injuries"
+```
+```{r}
+##aggregate fatalities by event 
+agg.fatalities <- ddply(mydata, .(EVENT), summarize, Total = sum(FATALITIES, na.rm = TRUE))
+agg.fatalities$type <- "fatalities"
+
+##aggregate injuries by event 
+agg.injuries <- ddply(mydata, .(EVENT), summarize, Total = sum(INJURIES, na.rm = TRUE))
+agg.injuries$type <- "injuries"
+
+##all combines 
+agg.health <- rbind(agg.fatalities, agg.injuries)
+
+health.by.event <- join(agg.fatalities, agg.injuries, by="EVENT", type="inner")
+health.by.event
+```
+### Aggregating Events for Economic Variables 
+```{r}
+##aggregating property and crop damage by event 
+agg.propdmg.cropdmg <- ddply(mydata, .(EVENT), summarize, Total = sum(property.damage + crop.damage, na.rm = TRUE))
+agg.propdmg.cropdmg$type <- "property and crop damage"
+
+##aggregate property damage by event 
+agg.prop <- ddply(mydata, .(EVENT), summarize, Total = sum(property.damage, na.rm = TRUE))
+agg.prop$type <- "property damage"
+
+##aggregate property damage by event 
+agg.crop <- ddply(mydata, .(EVENT), summarize, Total = sum(crop.damage, na.rm = TRUE))
+agg.crop$type <- "crop damage"
+
+##combine all 
+agg.economic <- rbind(agg.prop, agg.crop)
+
+economic.by.event <- join(agg.prop, agg.crop, by="EVENT", type="inner")
+economic.by.event
+```
+## Results 
+### Across the United States, which types of events are most harmful with respect to population health?
+```{r}
+#tranforming EVENT as a factor 
+agg.health$EVENT <- as.factor(agg.health$EVENT)
+
+##plotting fatalities and injuries 
+health.plot <- ggplot(agg.health, aes(x = EVENT, y = Total, fill = type)) + geom_bar(stat = "identity") +
+      coord_flip() +
+      xlab("Event Type") +
+      ylab("Health Impact") +
+      ggtitle("Weather event types impact on public health") +
+      theme(plot.title = element_text(hjust = 0.5))
+print(health.plot)
+```
+The most harmful weather event for health (in number of total fatalites and injuries) is, by far, a __tornado__.
+
+### Across the United States, which types of events are most harmful with respect to economics?
+```{r}
+##tranforming EVENT as a factor 
+agg.economic$EVENT <- as.factor(agg.economic$EVENT)
+
+##plotting the damage 
+economic.plot <- ggplot(agg.economic, aes(x = EVENT, y = Total, fill = type)) + geom_bar(stat = "identity") +
+      coord_flip() +
+      xlab("Event Type") +
+      ylab("Total Damages Sustained") +
+      ggtitle("Impact of Weather on property and crop damages") +
+      theme(plot.title = element_text(hjust = 0.5))
+print(economic.plot)
+```
+The most devastating weather event with the greatest economic cosequences (to property and crops) is a __flood__.
+
+## Conclusion 
+
+Hence as seen from the above analysis, Tornados are the biggest devastation for human life where as Floods are disrupt the economy more than all other Weather events. 
